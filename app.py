@@ -14,7 +14,7 @@ from pypdf import PdfReader
 from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 
@@ -32,13 +32,6 @@ def load_embeddings():
 @st.cache_resource
 def load_llm():
     return ChatGroq(model="llama-3.3-70b-versatile", temperature=0, groq_api_key=groq_api_key)
-
-# --- Per-session in-memory vector store ---
-
-def get_vector_store():
-    if "vector_store" not in st.session_state:
-        st.session_state.vector_store = Chroma(embedding_function=load_embeddings())
-    return st.session_state.vector_store
 
 # --- Core Logic ---
 
@@ -58,15 +51,15 @@ def process_document(file_bytes: bytes, filename: str) -> int:
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.create_documents([text])
 
-    vs = get_vector_store()
-    existing = vs.get()
-    if existing["ids"]:
-        vs.delete(existing["ids"])
-    vs.add_documents(chunks)
+    st.session_state.vector_store = FAISS.from_documents(chunks, load_embeddings())
+    st.session_state.doc_text = text
     return len(chunks)
 
 def ask_question(question: str) -> dict:
-    vs = get_vector_store()
+    vs = st.session_state.get("vector_store")
+    if vs is None:
+        return {"answer": "No document loaded.", "confidence": 0.0}
+
     results = vs.similarity_search_with_score(question, k=3)
 
     if not results or results[0][1] > 1.5:
@@ -84,15 +77,15 @@ def ask_question(question: str) -> dict:
     }
 
 def extract_data() -> dict:
-    vs = get_vector_store()
-    docs = vs.get()
-    full_text = "\n".join(docs["documents"])[:6000]
+    full_text = st.session_state.get("doc_text", "")
+    if not full_text:
+        return {"error": "No document loaded."}
 
     prompt = (
         "You are a data extraction tool. Extract the following fields into a VALID JSON object: "
         "Shipment_id, shipper, consignee, rate, and stops. "
         "Do not include any extra text or markdown code blocks. "
-        f"Text: {full_text}"
+        f"Text: {full_text[:6000]}"
     )
 
     response = load_llm().invoke(prompt)
