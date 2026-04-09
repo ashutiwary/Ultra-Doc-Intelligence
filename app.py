@@ -55,16 +55,7 @@ def process_document(file_bytes: bytes, filename: str) -> int:
     st.session_state.doc_text = text
     return len(chunks)
 
-_GREETINGS = {"hi", "hello", "hey", "howdy", "hiya", "greetings", "good morning",
-              "good afternoon", "good evening", "what's up", "sup"}
-
 def ask_question(question: str) -> dict:
-    # Handle greetings without touching the vector store
-    if question.strip().lower().rstrip("!.,?") in _GREETINGS:
-        doc_loaded = st.session_state.get("vector_store") is not None
-        answer = "Hello! How can I help you with your document?" if doc_loaded else "Hello! Upload a document and ask me anything about it."
-        return {"answer": answer, "confidence": 1.0}
-
     vs = st.session_state.get("vector_store")
     if vs is None:
         return {"answer": "Please upload and process a document first.", "confidence": 0.0}
@@ -75,14 +66,23 @@ def ask_question(question: str) -> dict:
         return {"answer": "Could not find relevant content in the document.", "confidence": 0.0}
 
     context = "\n\n".join([doc.page_content for doc, score in results])
+    
+    # --- UPDATED PROMPT ---
     prompt = (
-        "You are a helpful assistant. Answer the question using only the context below. "
-        "If the answer is not in the context, say 'I could not find that information in the uploaded document'.\n\n"
-        f"Context:\n{context}\n\nQuestion: {question}"
+        "You are a helpful AI assistant analyzing a document. Follow these strict rules:\n"
+        "1. If the User Input is a simple greeting or pleasantry (e.g., 'Hi', 'Hello', 'How are you?'), "
+        "respond politely and ask how you can help them with their document today. Ignore the context for greetings.\n"
+        "2. If the User Input is a question, answer it using ONLY the Context provided below.\n"
+        "3. If the User Input is a question but the answer is not contained in the Context, "
+        "say exactly: 'I could not find that information in the uploaded document.'\n\n"
+        f"Context:\n{context}\n\n"
+        f"User Input: {question}"
     )
 
     response = load_llm().invoke(prompt)
     best_score = results[0][1]
+    
+    # Calculate confidence
     confidence = max(0.0, round(1.0 - (best_score / 2.0), 2))
 
     return {
