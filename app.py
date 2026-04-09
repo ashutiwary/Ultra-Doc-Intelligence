@@ -61,10 +61,9 @@ _GREETINGS = {"hi", "hello", "hey", "howdy", "hiya", "greetings", "good morning"
 def ask_question(question: str) -> dict:
     # Handle greetings without touching the vector store
     if question.strip().lower().rstrip("!.,?") in _GREETINGS:
-        return {
-            "answer": "Hello! Upload a document and ask me anything about it.",
-            "confidence": 1.0,
-        }
+        doc_loaded = st.session_state.get("vector_store") is not None
+        answer = "Hello! How can I help you with your document?" if doc_loaded else "Hello! Upload a document and ask me anything about it."
+        return {"answer": answer, "confidence": 1.0}
 
     vs = st.session_state.get("vector_store")
     if vs is None:
@@ -117,7 +116,8 @@ st.set_page_config(page_title="Ultra Doc-Intelligence", layout="wide")
 
 with st.sidebar:
     st.title("Document Center")
-    st.write("Upload a logistics document to start chatting.")
+
+    st.info("**How to get started:**\n1. Upload a PDF, DOCX, or TXT file below.\n2. Click **Process Document** to index it.\n3. Ask questions in the chat on the right.")
 
     uploaded_file = st.file_uploader("Upload PDF / DOCX / TXT", type=["pdf", "docx", "txt"])
 
@@ -135,6 +135,8 @@ with st.sidebar:
             st.warning("Please select a file first.")
 
     st.divider()
+
+    st.caption("**Run Data Extraction** automatically pulls key logistics fields (Shipment ID, shipper, consignee, rate, stops) from the processed document and displays them as JSON.")
 
     if st.button("Run Data Extraction", use_container_width=True):
         with st.spinner("Extracting fields..."):
