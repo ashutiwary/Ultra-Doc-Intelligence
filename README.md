@@ -1,59 +1,103 @@
-# Ultra Doc-Intelligence: Logistics AI Assistant
+# Ultra Doc-Intelligence
 
-A Proof of Concept (POC) AI system that allows users to upload logistics documents (Rate Confirmations, BOLs), interact with them using natural language, and extract structured JSON data.
+A simple AI chatbot that lets you upload a logistics document (PDF, DOCX, or TXT) and ask questions about it in plain English. It also has a one-click button to pull out key fields as structured JSON.
 
-## Architecture & Tech Stack
-* **Backend:** FastAPI (Python) for modular API endpoints.
-* **Frontend:** Streamlit for a lightweight, interactive UI.
-* **Document Parsing:** LlamaParse to convert dense logistics tables into Markdown.
-* **Embeddings:** HuggingFace `sentence-transformers/all-MiniLM-L6-v2` (Local, fast).
-* **Vector Database:** ChromaDB (Local persistent storage).
-* **LLM Orchestration:** LangChain / Groq API (Llama 3) for high-speed inference.
+## Tech Stack
 
-## API Endpoints
-* `POST /upload`: Accepts PDF/DOCX/TXT files, parses text (preserving tables), chunks data, and stores embeddings in ChromaDB.
-* `POST /ask`: Accepts natural language questions, retrieves context via RAG, applies hallucination guardrails, and returns an answer with a confidence score and sources.
-* `POST /extract`: Extracts a strict JSON schema containing: `Shipment_id, shipper, consignee, pickup_datetime, delivery_datetime, equipment_type, mode, rate, currency, weight, carrier_name`. Returns nulls for missing fields.
+- **Frontend:** Streamlit (single-file app, no separate backend needed)
+- **Document Parsing:** pypdf (PDF), python-docx (DOCX), plain text for TXT files
+- **Embeddings:** HuggingFace `sentence-transformers/all-MiniLM-L6-v2` (runs locally, no API needed)
+- **Vector Database:** ChromaDB (in-memory, scoped per session)
+- **LLM:** Groq API with Llama 3.3 70B
 
-## Core Strategies
+## How it works
 
-### Chunking Strategy
-Logistics documents contain dense tables. Standard character splitting destroys table context. 
-1. **Markdown Parse:** We use LlamaParse to extract tables as Markdown.
-2. **Semantic Split:** `MarkdownHeaderTextSplitter` groups related key-value pairs.
-3. **Token Limit Split:** `RecursiveCharacterTextSplitter` (chunk_size=500) ensures chunks fit within the strict 256-token limit of the MiniLM embedding model.
+1. Upload a document through the sidebar.
+2. The app extracts the text, splits it into chunks, and stores the embeddings in an in-memory ChromaDB instance.
+3. When you ask a question, the app finds the most relevant chunks and sends them to the LLM along with your question.
+4. The LLM answers based only on what is in the document.
 
-### Retrieval Method
-The system embeds the user query and performs a similarity search (`k=3`) against the ChromaDB vector index to retrieve the most contextually relevant document chunks.
+Each new upload clears the previous document, so the chat is always scoped to whatever you last uploaded.
 
-### Guardrails Approach
-We implemented a strict threshold guardrail to prevent hallucinations. If the vector distance (L2 metric) of the best matching chunk exceeds a threshold of `1.5`, the system refuses to answer and returns "Not found in document".
+## Features
 
-### Confidence Scoring Method
-The confidence score is a heuristic calculation derived from the L2 distance of the top retrieved chunk. It normalizes the distance into a 0.0 to 1.0 scale, where a lower distance yields a higher confidence percentage.
+- Chat with any logistics document
+- Confidence score on every answer
+- Guardrail that returns "Not found in document" if the answer is not in the document
+- One-click structured JSON extraction of key logistics fields (Shipment ID, shipper, consignee, rate, stops)
 
-## Known Failure Cases
-* **Complex Multi-Page Tables:** If a table spans multiple pages, LlamaParse may occasionally break the header-to-row relationship.
-* **Strict JSON Adherence:** Open-weight models on Groq are fast but can sometimes miss optional fields in the structured extraction schema compared to proprietary models.
+## Guardrails
 
-## Improvement Ideas
-* Integrate a reranker (like Cohere) to improve retrieval accuracy before sending context to the LLM.
-* Use the `Instructor` Python library to enforce stricter Pydantic schema validation for the structured extraction endpoint.
+If the best matching chunk has a vector distance above 1.5, the system returns "Not found in document" instead of guessing. This prevents the LLM from making up answers.
 
-## How to Run Locally
+## How to run locally
 
-1. Setup Environment:
-    python -m venv venv
+**1. Clone the repo**
+
+```bash
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+```
+
+**2. Create and activate a virtual environment**
+
+```bash
+python -m venv venv
+
+# Windows
+.\venv\Scripts\activate
+
+# Mac/Linux
 source venv/bin/activate
+```
+
+**3. Install dependencies**
+
+```bash
 pip install -r requirements.txt
+```
 
-2. Environment Variables:
-    export GROQ_API_KEY="your_key"
-export LLAMA_CLOUD_API_KEY="your_key"
+**4. Set up your API key**
 
-3. Run Backend:
-    uvicorn main:app --reload
+Create a `.streamlit/secrets.toml` file:
 
-4. Run Frontend:
-    source venv/bin/activate
+```toml
+GROQ_API_KEY = "your_groq_api_key_here"
+```
+
+Or create a `.env` file:
+
+```
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+**5. Run the app**
+
+```bash
 streamlit run app.py
+```
+
+The app will open at `http://localhost:8501`.
+
+## Deploy to Streamlit Community Cloud (free)
+
+1. Push your code to a public GitHub repo (make sure `.streamlit/secrets.toml` is in `.gitignore`)
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with Google
+3. Connect your GitHub account and select your repo
+4. In "Advanced settings", add your secret:
+   ```
+   GROQ_API_KEY = "your_groq_api_key_here"
+   ```
+5. Click Deploy
+
+## Known Limitations
+
+- Complex tables that span multiple pages may not parse well since the row and header relationship can get broken during text extraction.
+- The Llama model on Groq occasionally misses optional fields in the JSON extraction compared to larger proprietary models.
+- The vector store is in-memory, so it resets if the app restarts or the session ends.
+
+## Ideas for improvement
+
+- Add a reranker (like Cohere) to improve which chunks get sent to the LLM.
+- Use the `Instructor` library to enforce strict Pydantic schema validation on the extraction output.
+- Add persistent storage so the document survives page refreshes.
