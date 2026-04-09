@@ -57,9 +57,21 @@ def process_document(file_bytes: bytes, filename: str) -> int:
 
 def ask_question(question: str) -> dict:
     vs = st.session_state.get("vector_store")
+    
+    # --- SCENARIO A: No Document Uploaded ---
     if vs is None:
-        return {"answer": "Please upload and process a document first.", "confidence": 0.0}
+        # We let the LLM decide how to respond based purely on this prompt
+        no_doc_prompt = (
+            "You are a helpful AI Logistics Assistant. Currently, NO document has been uploaded by the user.\n"
+            "Follow these rules based on the User Input:\n"
+            "1. If it is a greeting or pleasantry, say hello and politely ask them to upload a document to get started.\n"
+            "2. If it is a specific question, explain that you need them to upload a document first before you can answer.\n\n"
+            f"User Input: {question}"
+        )
+        response = load_llm().invoke(no_doc_prompt)
+        return {"answer": response.content, "confidence": 0.0}
 
+    # --- SCENARIO B: Document IS Uploaded ---
     results = vs.similarity_search_with_score(question, k=4)
 
     if not results:
@@ -67,22 +79,19 @@ def ask_question(question: str) -> dict:
 
     context = "\n\n".join([doc.page_content for doc, score in results])
     
-    # --- UPDATED PROMPT ---
-    prompt = (
-        "You are a helpful AI assistant analyzing a document. Follow these strict rules:\n"
-        "1. If the User Input is a simple greeting or pleasantry (e.g., 'Hi', 'Hello', 'How are you?'), "
-        "respond politely and ask how you can help them with their document today. Ignore the context for greetings.\n"
+    # We let the LLM handle greetings vs. document retrieval here
+    rag_prompt = (
+        "You are a helpful AI logistics assistant analyzing a document. Follow these strict rules:\n"
+        "1. If the User Input is a greeting or casual conversation, respond politely and ask what they want to know about their document.\n"
         "2. If the User Input is a question, answer it using ONLY the Context provided below.\n"
-        "3. If the User Input is a question but the answer is not contained in the Context, "
-        "say exactly: 'I could not find that information in the uploaded document.'\n\n"
+        "3. If the answer is not contained in the Context, say exactly: "
+        "'I could not find that information in the uploaded document.'\n\n"
         f"Context:\n{context}\n\n"
         f"User Input: {question}"
     )
 
-    response = load_llm().invoke(prompt)
+    response = load_llm().invoke(rag_prompt)
     best_score = results[0][1]
-    
-    # Calculate confidence
     confidence = max(0.0, round(1.0 - (best_score / 2.0), 2))
 
     return {
