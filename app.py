@@ -55,25 +55,40 @@ def process_document(file_bytes: bytes, filename: str) -> int:
     st.session_state.doc_text = text
     return len(chunks)
 
+_GREETINGS = {"hi", "hello", "hey", "howdy", "hiya", "greetings", "good morning",
+              "good afternoon", "good evening", "what's up", "sup"}
+
 def ask_question(question: str) -> dict:
+    # Handle greetings without touching the vector store
+    if question.strip().lower().rstrip("!.,?") in _GREETINGS:
+        return {
+            "answer": "Hello! Upload a document and ask me anything about it.",
+            "confidence": 1.0,
+        }
+
     vs = st.session_state.get("vector_store")
     if vs is None:
-        return {"answer": "No document loaded.", "confidence": 0.0}
+        return {"answer": "Please upload and process a document first.", "confidence": 0.0}
 
-    results = vs.similarity_search_with_score(question, k=3)
+    results = vs.similarity_search_with_score(question, k=4)
 
-    if not results or results[0][1] > 1.5:
-        return {"answer": "Not found in document.", "confidence": 0.0}
+    if not results:
+        return {"answer": "Could not find relevant content in the document.", "confidence": 0.0}
 
     context = "\n\n".join([doc.page_content for doc, score in results])
-    prompt = f"Answer only from the context below.\nContext: {context}\nQuestion: {question}"
+    prompt = (
+        "You are a helpful assistant. Answer the question using only the context below. "
+        "If the answer is not in the context, say 'I could not find that information in the uploaded document'.\n\n"
+        f"Context:\n{context}\n\nQuestion: {question}"
+    )
 
     response = load_llm().invoke(prompt)
-    confidence = max(0.0, 1.0 - (results[0][1] / 2.0))
+    best_score = results[0][1]
+    confidence = max(0.0, round(1.0 - (best_score / 2.0), 2))
 
     return {
         "answer": response.content,
-        "confidence": round(confidence, 2),
+        "confidence": confidence,
     }
 
 def extract_data() -> dict:
